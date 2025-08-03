@@ -1,0 +1,78 @@
+name: Claude Code Research Assistant
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  claude:
+    # Run on @claude mentions or PR events
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'issues' && (github.event.action == 'assigned' && github.event.assignee.login == 'claude')) ||
+      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
+      github.event_name == 'pull_request'
+    
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Get branch type
+        id: branch_type
+        run: |
+          BRANCH=${{ github.head_ref || github.ref_name }}
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          
+          # Detect branch type based on prefix
+          if [[ $BRANCH == lit-review/* ]]; then
+            echo "type=literature-review" >> $GITHUB_OUTPUT
+          elif [[ $BRANCH == idea-generation/* ]]; then
+            echo "type=idea-generation" >> $GITHUB_OUTPUT
+          elif [[ $BRANCH == experiment-proposal/* ]]; then
+            echo "type=experiment-proposal" >> $GITHUB_OUTPUT
+          elif [[ $BRANCH == run-experiment/* ]] || [[ $BRANCH == feat/* ]] || [[ $BRANCH == fix/* ]]; then
+            echo "type=run-experiment" >> $GITHUB_OUTPUT
+          elif [[ $BRANCH == analyze-experiment/* ]]; then
+            echo "type=analyze-experiment" >> $GITHUB_OUTPUT
+          else
+            echo "type=general" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Claude Code Action
+        uses: anthropics/claude-code-action@beta
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Or use OAuth token instead:
+          # claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          timeout_minutes: "60"
+          # Branch-specific prompts loaded from CLAUDE.md
+          # MCP tools available based on branch type
+          custom_instructions: |
+            You are a research assistant following CS197 methodology. 
+            Branch type: ${{ steps.branch_type.outputs.type }}
+            ${{ steps.branch_type.outputs.type == 'literature-review' && 'Focus on comprehensive paper review using Semantic Scholar and Exa.' || '' }}
+            ${{ steps.branch_type.outputs.type == 'idea-generation' && 'Generate novel research ideas by identifying bit flips in assumptions.' || '' }}
+            ${{ steps.branch_type.outputs.type == 'experiment-proposal' && 'Design rigorous experiments with clear DV/IV and evaluation plans.' || '' }}
+            ${{ steps.branch_type.outputs.type == 'run-experiment' && 'Review implementation for correctness, reproducibility, and test coverage.' || '' }}
+            ${{ steps.branch_type.outputs.type == 'analyze-experiment' && 'Analyze results with appropriate statistics and honest interpretations.' || '' }}
+        env:
+          EXA_API_KEY: ${{ secrets.EXA_API_KEY }}
+          SEMANTIC_SCHOLAR_API_KEY: ${{ secrets.SEMANTIC_SCHOLAR_API_KEY }}
